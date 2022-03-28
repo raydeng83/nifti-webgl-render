@@ -55,7 +55,29 @@
     </li>
   </ul>
 </div>
-<div id="gl-container" ondrop="drop(event)" ondragover="allowDrop(event)">
-  <canvas id="glcanvas"></canvas>
+<div id="gl-container" ondrop="drop(event)" ondragover="allowDrop(event)" style="background-color: #938f8f">
+<!--  <mat-toolbar class="pl-1 " style="background-color: #c7c7c7; font-size: small; height: 30px;">-->
+<!--    <span class="fill-space"></span>-->
+<!--    <span>Min <mat-slider style="width: 250px;"-->
+<!--                          color="primary"-->
+<!--                          [displayWith]="formatLabel"-->
+<!--                          [(ngModel)]="minValue"-->
+<!--                          (change)="adjustMinValue($event)"-->
+<!--                          tickInterval="1"-->
+<!--                          step="1"-->
+<!--                          min="-3024"-->
+<!--                          max="0"-->
+<!--                          aria-label="units"></mat-slider>&nbsp;&nbsp;<span style="width: 50px;display: inline-block;">{{minValue}}</span></span>-->
+<!--    <span class="ml-1">Max <mat-slider style="width: 250px;"-->
+<!--                                       color="primary"-->
+<!--                                       [displayWith]="formatLabel"-->
+<!--                                       [(ngModel)]="maxValue"-->
+<!--                                       (change)="adjustMaxValue($event)"-->
+<!--                                       tickInterval="1"-->
+<!--                                       step="1"-->
+<!--                                       min="0"-->
+<!--                                       max="3071"-->
+<!--                                       aria-label="units"></mat-slider>&nbsp;&nbsp;<span style="width: 50px;display: inline-block;">{{maxValue}}</span></span>-->
+<!--  </mat-toolbar>-->
+  <canvas #glcanvas id="glcanvas" ></canvas>
 </div>
-

@@ -1,4 +1,4 @@
-import {Component, OnInit} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, OnInit, ViewChild} from '@angular/core';
 import {mat4, vec3} from "gl-matrix";
 
 declare var Shader: any;
@@ -19,42 +19,62 @@ declare var Controller: any;
   templateUrl: './renderer.component.html',
   styleUrls: ['./renderer.component.css']
 })
-export class RendererComponent implements OnInit {
-  takeScreenShot = false;
-  cubeStrip = [0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0];
-  container = null;
-  isBlackBackColor = true;
-  gl = null;
-  isDrawOnDemand = true;
-  canvas = null;
+export class RendererComponent implements OnInit, AfterViewInit {
+  @ViewChild('glcanvas', {static: false})
+  canvas: ElementRef = {} as ElementRef;
+  gl;
+  isDrawOnDemand;
   shader = null;
+  colorOpacity = 3;
+  samplingRate = 1.0;
+  hdr;
   blurShader = null;
   sobelShader = null;
-  volumeTexture = null;
-  gradientTexture = null;
-  colormap = null;
-  proj = null;
-  vao = null;
-  vbo = null;
-  tex = null;
-  camera = null;
-  projView = null;
+  tex;
+  gradientTexture;
+  vao;
+  vbo;
+  volumeTexture;
+  projView;
+  proj;
+  camera;
+  cubeStrip = [0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0];
+  takeScreenShot = false;
+  vox;
+  img;
   newVolumeUpload = true;
   targetFrameTime = 32;
-  samplingRate = 1.0;
+  colorName = "";
+  colormap = null;
   WIDTH = 320;
   HEIGHT = 320;
-  hdr ;
-  img ;
-  colorName = "";
-  colorOpacity = 2;
   center = vec3.set(vec3.create(), 0.5, 0.5, 0.5);
+  isBlackBackColor = true;
+  openDialog;
 
-  openDialog = document.createElement('input');
+  minValue = -3024;
+  maxValue = 3071;
 
+  constructor(
+  ) {
+    const that = this;
+    // this.canvas = <HTMLCanvasElement>document.getElementById("glcanvas");
+    this.openDialog= document.createElement('input');
 
-  constructor() {
+    this.openDialog.type = 'file';
+    this.openDialog.onchange = e => {
+      this.selectVolume((<HTMLInputElement>e.target).files[0], false);
+    }
+    document.addEventListener("keydown", function (evt) {
+      if (evt.key == "z") that.adjustOpacity(0.9);
+      if (evt.key == "a") that.adjustOpacity(1.1);
+      if (evt.key == "w") that.adjustQuality(1.1);
+      if (evt.key == "q") that.adjustQuality(0.9);
+    });
+    if (this.isDrawOnDemand)
+      document.addEventListener('cameraRedraw', e => this.glDraw());
   }
+
 
   adjustQuality(scale) {
     this.samplingRate = this.samplingRate * scale;
@@ -82,7 +102,6 @@ export class RendererComponent implements OnInit {
         console.log(event.target.result);
         //loadGeometryCore(object, isOverlay);
         var hdr = nifti.readHeader(event.target.result);
-        console.log(hdr)
         var img;
         if (nifti.isCompressed(event.target.result)) {
           img = nifti.readImage(hdr, nifti.decompress(event.target.result));
@@ -139,7 +158,7 @@ export class RendererComponent implements OnInit {
     var faceStrip = [0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0];
     var vao2 = this.gl.createVertexArray();
     this.gl.bindVertexArray(vao2);
-    var vbo2 = this.gl.createBuffer();
+    let vbo2 = this.gl.createBuffer();
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vbo2);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(faceStrip), this.gl.STATIC_DRAW);
     this.gl.enableVertexAttribArray(0);
@@ -149,9 +168,8 @@ export class RendererComponent implements OnInit {
     this.gl.disable(this.gl.CULL_FACE);
     this.gl.viewport(0, 0, this.hdr.dims[1], this.hdr.dims[2]);
     this.gl.disable(this.gl.BLEND);
-    var tempTex3D = this.bindBlankGL();
-    console.log(this.blurShader)
-    this.blurShader.use();
+    let tempTex3D = this.bindBlankGL();
+    this.blurShader.use(this.gl);
     this.gl.activeTexture(this.gl.TEXTURE1);
     this.gl.bindTexture(this.gl.TEXTURE_3D, this.tex);
     this.gl.uniform1i(this.blurShader.uniforms["intensityVol"], 1);
@@ -161,14 +179,14 @@ export class RendererComponent implements OnInit {
 
     this.gl.bindVertexArray(vao2);
     for (let i = 0; i < (this.hdr.dims[3] - 1); i++) {
-      var coordZ = 1 / this.hdr.dims[3] * (i + 0.5);
+      let coordZ = 1 / this.hdr.dims[3] * (i + 0.5);
       this.gl.uniform1f(this.blurShader.uniforms["coordZ"], coordZ);
       this.gl.framebufferTextureLayer(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, tempTex3D, 0, i);
       this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
       this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, faceStrip.length / 3);
     }
 
-    this.sobelShader.use();
+    this.sobelShader.use(this.gl);
     this.gl.activeTexture(this.gl.TEXTURE1);
     this.gl.bindTexture(this.gl.TEXTURE_3D, tempTex3D);//input texture
     this.gl.uniform1i(this.sobelShader.uniforms["intensityVol"], 1);
@@ -191,7 +209,7 @@ export class RendererComponent implements OnInit {
     this.gl.deleteFramebuffer(fb);
     this.gl.deleteTexture(tempTex3D);
     //return to volume rendering shader
-    this.shader.use();
+    this.shader.use(this.gl);
     this.gl.bindVertexArray(this.vao);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vbo);
     this.gl.activeTexture(this.gl.TEXTURE0);
@@ -217,14 +235,14 @@ export class RendererComponent implements OnInit {
     this.projView = mat4.mul(this.projView, this.proj, this.camera.camera);
     this.gl.uniformMatrix4fv(this.shader.uniforms["proj_view"], false, this.projView);
     //var eye = [camera.invCamera[12], camera.invCamera[13], camera.invCamera[14]];
-    var eye = this.camera.eyePos();
+    var eye = this.camera.eyePos(this.camera);
     this.gl.uniform3fv(this.shader.uniforms["eye_pos"], eye);
     //Lighting
     //"Head-light" with light at camera location:
     //gl.uniform3fv(shader.uniforms["light_pos"], eye);
     //we will place a light directly above the camera, mixing headlight with top light
     var mx = Math.max(Math.abs(eye));
-    var up = this.camera.upDir();
+    let up = this.camera.upDir();
     var light = eye;
     light[0] = eye[0] + up[0] * mx;
     light[1] = eye[1] + up[1] * mx;
@@ -236,31 +254,32 @@ export class RendererComponent implements OnInit {
     this.gl.finish();
     if (this.takeScreenShot) {
       this.takeScreenShot = false;
-      this.canvas.toBlob(function (b) {
-        this.saveAs(b, "screen.png");
+      this.canvas.nativeElement.toBlob(function (b) {
+        // saveAs(b, "screen.png");
       }, "image/png");
     }
   }
 
   updateVolume() { //load volume or change contrast
+    const that = this;
+    let imgRaw;
     //convert data to 8-bit image
-    var imgRaw;
-    var vox = this.hdr.dims[1] * this.hdr.dims[2] * this.hdr.dims[3];
-    var img8 = new Uint8Array(vox);
+    this.vox = this.hdr.dims[1] * this.hdr.dims[2] * this.hdr.dims[3];
+    let img8 = new Uint8Array(this.vox);
     if (this.hdr.datatypeCode === 2) //data already uint8
-       imgRaw = new Uint8Array(this.img);
+      imgRaw = new Uint8Array(this.img);
     else if (this.hdr.datatypeCode === 4)
-       imgRaw = new Int16Array(this.img);
+      imgRaw = new Int16Array(this.img);
     else if (this.hdr.datatypeCode === 16)
-       imgRaw = new Float32Array(this.img);
+      imgRaw = new Float32Array(this.img);
     else if (this.hdr.datatypeCode === 512)
-       imgRaw = new Uint16Array(this.img);
-    var mn = this.hdr.cal_min;
-    var mx = this.hdr.cal_max;
+      imgRaw = new Uint16Array(this.img);
+    let mn = this.hdr.cal_min;
+    let mx = this.hdr.cal_max;
     var scale = 1;
     if (mx > mn) scale = 255 / (mx - mn);
-    for (let i = 0; i < (vox - 1); i++) {
-      var v = imgRaw[i];
+    for (let i = 0; i < (this.vox - 1); i++) {
+      let v = imgRaw[i];
       v = (v * this.hdr.scl_slope) + this.hdr.scl_inter;
       if (v < mn)
         img8[i] = 0;
@@ -284,59 +303,56 @@ export class RendererComponent implements OnInit {
     var volScale = [this.hdr.dims[1] / longestAxis, this.hdr.dims[2] / longestAxis, this.hdr.dims[3] / longestAxis];
     this.gl.uniform3iv(this.shader.uniforms["volume_dims"], [this.hdr.dims[1], this.hdr.dims[2], this.hdr.dims[3]]);
     this.gl.uniform3fv(this.shader.uniforms["volume_scale"], volScale);
-    var newVolumeUpload = true;
-
+    this.newVolumeUpload = true;
     //gradientGL();
-    const that = this;
     if (!this.volumeTexture) {
       this.volumeTexture = this.tex;
-      if (this.isDrawOnDemand) {}
-        //glDraw();
-      else {
+      if (this.isDrawOnDemand) {
+      } else {
+
         setInterval(function () {
           // Save them some battery if they're not viewing the tab
           if (document.hidden) {
             return;
           }
-          var startTime:any = new Date();
+          var startTime: any = new Date();
           // Reset the sampling rate and camera for new volumes
-          if (newVolumeUpload) {
+          if (that.newVolumeUpload) {
             that.onWindowResize();
             that.samplingRate = 1.0;
             that.gl.uniform1f(that.shader.uniforms["dt_scale"], that.samplingRate);
           }
           that.glDraw();
-          var endTime:any = new Date();
+          var endTime: any = new Date();
           var renderTime = endTime - startTime;
           var targetSamplingRate = renderTime / that.targetFrameTime;
           if (that.takeScreenShot) {
             that.takeScreenShot = false;
-            that.canvas.toBlob(function (b) {
+            that.canvas.nativeElement.toBlob(function (b) {
               // saveAs(b, "screen.png");
             }, "image/png");
           }
           // If we're dropping frames, decrease the sampling rate
-          if (!newVolumeUpload && targetSamplingRate > that.samplingRate) {
+          if (!that.newVolumeUpload && targetSamplingRate > that.samplingRate) {
             that.samplingRate = 0.8 * that.samplingRate + 0.2 * targetSamplingRate;
             that.gl.uniform1f(that.shader.uniforms["dt_scale"], that.samplingRate);
           }
-          newVolumeUpload = false;
+          that.newVolumeUpload = false;
           startTime = endTime;
-        }, this.targetFrameTime);
+        }, that.targetFrameTime);
       }
     } else {
-      this.gl.deleteTexture(this.volumeTexture);
-      this.volumeTexture = this.tex;
-      if (this.isDrawOnDemand) this.glDraw();
+      that.gl.deleteTexture(that.volumeTexture);
+      that.volumeTexture = that.tex;
+      if (that.isDrawOnDemand) that.glDraw();
     }
-    this.gradientGL();
-    this.glDraw();
-  }
+    that.gradientGL();
+    that.glDraw();
+  } //updateVolume()
 
   selectVolume(url, isURL = true) {
     const that = this;
     this.loadVolume(url, isURL, function (file, xhdr, ximg) {
-      console.log(xhdr)
       that.hdr = xhdr;
       that.img = ximg;
       //determine range
@@ -347,6 +363,8 @@ export class RendererComponent implements OnInit {
         imgRaw = new Int16Array(that.img);
       else if (that.hdr.datatypeCode === 16)  //Float32
         imgRaw = new Float32Array(that.img);
+      else if (that.hdr.datatypeCode === 32)  //Float32
+        imgRaw = new Float64Array(that.img);
       else if (that.hdr.datatypeCode === 512) //UInt16
         imgRaw = new Uint16Array(that.img);
       else {
@@ -391,7 +409,7 @@ export class RendererComponent implements OnInit {
     gl.texImage2D(gl.TEXTURE_2D, 0, type, width, height, 0, type, gl.UNSIGNED_BYTE, dataTypedArray);
     // Other texture setup here, like filter modes and mipmap generation
     return texture;
-  }
+  } // textureFromPixelArray()
 
   makeLut(Rs, Gs, Bs, As, Is) {
 //create color lookup table provided arrays of reds, greens, blues, alphas and intensity indices
@@ -417,7 +435,7 @@ export class RendererComponent implements OnInit {
       }
     }
     return lut;
-  }
+  } // makeLut()
 
   selectColormap(lutName) {
     var lut = this.makeLut([0, 255], [0, 255], [0, 255], [0, 128], [0, 255]); //gray
@@ -438,6 +456,77 @@ export class RendererComponent implements OnInit {
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_R, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, 256, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, lut);
+  } // selectColormap()
+
+  ngOnInit(): void {
+  }
+
+  ngAfterViewInit(): void {
+    //window.onload start
+    const that = this;
+    document.body.style.background = "#000000";
+
+    //menu items
+    var buttons = document.getElementsByClassName("viewBtn");
+    for (let i = 0; i < buttons.length; i++)
+      buttons[i].addEventListener("click", this.onButtonClick.bind(this), false);
+    buttons = document.getElementsByClassName("divider");
+    for (let i = 0; i < buttons.length; i++)
+      buttons[i].addEventListener("click", this.onButtonClick.bind(this), false);
+    this.gl = this.canvas.nativeElement.getContext("webgl2");
+    this.gl.imageSmoothingEnabled = false;
+    if (!this.gl) {
+      alert("Unable to initialize WebGL2. Your browser may not support it");
+      return;
+    }
+    window.addEventListener('resize', function () {
+      that.onWindowResize()
+    }, false);
+    this.onWindowResize(true);
+    // Register mouse and touch listeners
+    var controller = new Controller();
+    controller.mousemove = function (prev, cur, evt) {
+      if (evt.buttons == 1) {
+        that.camera.rotate(prev, cur);
+
+      } else if (evt.buttons == 2) {
+        that.camera.pan([cur[0] - prev[0], prev[1] - cur[1]]);
+      }
+    };
+    controller.wheel = function (amt) {
+      that.camera.zoom(amt);
+    };
+    controller.pinch = controller.wheel;
+    controller.twoFingerDrag = function (drag) {
+      that.camera.pan(drag);
+    };
+    controller.registerForCanvas(this.canvas.nativeElement);
+    // Setup VAO and VBO to render the cube to run the raymarching shader
+    this.vao = this.gl.createVertexArray();
+    this.gl.bindVertexArray(this.vao);
+    this.vbo = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vbo);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(this.cubeStrip), this.gl.STATIC_DRAW);
+    this.gl.enableVertexAttribArray(0);
+    this.gl.vertexAttribPointer(0, 3, that.gl.FLOAT, false, 0, 0);
+    this.sobelShader = new Shader(blurVertShader, sobelFragShader, this.gl);
+    this.sobelShader.use(this.gl);
+    this.blurShader = new Shader(blurVertShader, blurFragShader, this.gl);
+    this.blurShader.use(this.gl);
+    this.setShader(0); //Lighting shader
+    // Setup required OpenGL state for drawing the back faces and
+    // composting with the background color
+    this.gl.enable(this.gl.CULL_FACE);
+    this.gl.cullFace(this.gl.FRONT);
+    this.gl.enable(this.gl.BLEND);
+    this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+    //gl.clearColor(1, 0.5, 0.5, 3);
+    // Load the default colormap and upload it, after which we
+    // load the default volume.
+    this.selectColormap("Gray");
+    this.selectVolume("assets/spm152.nii.gz");
+    // this.selectVolume();
+    //window.onload end
   }
 
   setShader(shaderInt) { //0=default, 1=lighting, 2=Maximum Intensity
@@ -457,42 +546,38 @@ export class RendererComponent implements OnInit {
   }
 
   onWindowResize(isInit = false) {
-    const that = this;
-
-    return function () {
-      that.WIDTH = that.canvas.clientWidth;
-      that.HEIGHT = that.canvas.clientHeight;//menuHeight;
-      // Check if the canvas is not the same size.
-      if (that.canvas.width != that.WIDTH || that.canvas.height != that.HEIGHT) {
-        // Make the canvas the same size
-        that.canvas.width = that.WIDTH;
-        that.canvas.height = that.HEIGHT;
-        //console.log("<< %s  %s", WIDTH, HEIGHT);
-      }
-      //https://webglfundamentals.org/webgl/lessons/webgl-resizing-the-canvas.html
-      that.gl.viewport(0, 0, that.gl.canvas.width, that.gl.canvas.height);
-      that.proj = mat4.perspective(mat4.create(), 15 * Math.PI / 180.0, that.WIDTH / that.HEIGHT, 0.1, 100);
-      that.camera = new ArcballCamera(that.center, 2, [that.WIDTH, that.HEIGHT]);
-      console.log(that.camera)
-      that.projView = mat4.create();
-      const kRot = Math.sqrt(0.5);
-      that.camera.rotateY([0.0, kRot]);
-      that.camera.rotateY([kRot, 0.0]);
-      //if (isInit) return;
-      //samplingRate = 1.0;
-      //gl.uniform1f(shader.uniforms["dt_scale"], samplingRate);
-      if ((that.shader !== null) && (that.isDrawOnDemand)) that.glDraw();
+    this.WIDTH = this.canvas.nativeElement.clientWidth;
+    this.HEIGHT = this.canvas.nativeElement.clientHeight;//menuHeight;
+    // Check if the canvas is not the same size.
+    if (this.canvas.nativeElement.width != this.WIDTH || this.canvas.nativeElement.height != this.HEIGHT) {
+      // Make the canvas the same size
+      this.canvas.nativeElement.width = this.WIDTH;
+      this.canvas.nativeElement.height = this.HEIGHT;
+      //console.log("<< %s  %s", WIDTH, HEIGHT);
     }
-  }
+    //https://webglfundamentals.org/webgl/lessons/webgl-resizing-the-canvas.html
+    this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
+    this.proj = mat4.perspective(mat4.create(), 15 * Math.PI / 180.0, this.WIDTH / this.HEIGHT, 0.1, 100);
+    this.camera = new ArcballCamera(this.center, 2, [this.WIDTH, this.HEIGHT]);
+    this.projView = mat4.create();
+    const kRot = Math.sqrt(0.5);
+    this.camera.rotateY([0.0, kRot]);
+    this.camera.rotateY([kRot, 0.0]);
+    //if (isInit) return;
+    //samplingRate = 1.0;
+    //gl.uniform1f(shader.uniforms["dt_scale"], samplingRate);
+    if ((this.shader !== null) && (this.isDrawOnDemand)) this.glDraw();
+  } //onWindowResize()
 
   onButtonClick(event) {
+    const that = this;
     var el = event.target.parentNode;
     el.style.display = "none";
     setTimeout(function () { //close menu
       el.style.removeProperty("display");
     }, 500);
     if (event.target.id === "ChangeContrast") {
-      var str = prompt("Set display intensity minimum and maximum", this.hdr.cal_min.toString() + " " + this.hdr.cal_max.toString());
+      let str = prompt("Set display intensity minimum and maximum", this.hdr.cal_min.toString() + " " + this.hdr.cal_max.toString());
       //if (isNaN(n))
       //	return;
       var strs = str.split(" ");
@@ -508,7 +593,7 @@ export class RendererComponent implements OnInit {
       return;
     }
     if (event.target.id.charAt(0) === '^') { //shader
-      var s = event.target.id.substr(1);
+      let s = event.target.id.substr(1);
       console.log("Setting shader to " + s);
       if (s === "Lighting")
         this.setShader(1);
@@ -524,18 +609,19 @@ export class RendererComponent implements OnInit {
       return;
     }
     if (event.target.id.charAt(0) === '!') { //load color scheme
-      s = event.target.id.substr(1);
+      let s = event.target.id.substr(1);
       this.colorOpacity = 2.0;
       this.selectColormap(s);
       if (this.isDrawOnDemand) this.glDraw();
       return;
     }
     if (event.target.id.charAt(0) === '_') { //load NIfTI volume
-      s = event.target.id.substr(1);
+      let s = event.target.id.substr(1);
       this.selectVolume(s);
       return;
     }
     if (event.target.id === "Open") {
+      console.log(this.openDialog)
       this.openDialog.click();
       return;
     }
@@ -553,9 +639,9 @@ export class RendererComponent implements OnInit {
     }
     if (event.target.id === "BackColor") {
       if (this.isBlackBackColor)
-        document.body.style.background = "#FFFFFF";
-      else
         document.body.style.background = "#000000";
+      else
+        document.body.style.background = "#FFFFFF";
       this.isBlackBackColor = !this.isBlackBackColor;
       return;
     }
@@ -599,113 +685,7 @@ export class RendererComponent implements OnInit {
       return;
     }
     console.log('Unknown menu item ', event.target.id);
-  }
-
-
-  ngOnInit(): void {
-    this.openDialog.type = 'file';
-    this.openDialog.onchange = e => {
-      this.selectVolume((<HTMLInputElement> e.target).files[0], false);
-    }
-
-    document.addEventListener("keydown", function(evt) {
-      if (evt.key == "z")  that.adjustOpacity(0.9);
-      if (evt.key == "a") that.adjustOpacity(1.1);
-      if (evt.key == "w") that.adjustQuality(1.1);
-      if (evt.key == "q")  that.adjustQuality(0.9);
-    });
-    if (this.isDrawOnDemand)
-      document.addEventListener('cameraRedraw', e => this.glDraw() );
-
-
-    this.canvas = document.getElementById("glcanvas");
-    if (this.isDrawOnDemand)
-      document.addEventListener('cameraRedraw', e => this.glDraw());
-
-    const that = this;
-
-
-    var selectColormap = function (lutName) {
-      var lut = that.makeLut([0, 255], [0, 255], [0, 255], [0, 128], [0, 255]); //gray
-      if (lutName === "Plasma")
-        lut = that.makeLut([13, 156, 237, 240], [8, 23, 121, 249], [135, 158, 83, 33], [0, 56, 80, 88], [0, 64, 192, 255]); //plasma
-      if (lutName === "Viridis")
-        lut = that.makeLut([68, 49, 53, 253], [1, 104, 183, 231], [84, 142, 121, 37], [0, 56, 80, 88], [0, 65, 192, 255]);//viridis
-      if (lutName === "Inferno")
-        lut = that.makeLut([0, 120, 237, 240], [0, 28, 105, 249], [4, 109, 37, 33], [0, 56, 80, 88], [0, 64, 192, 255]);//inferno
-      var colorName = lutName;
-      if (that.colormap !== null)
-        that.gl.deleteTexture(that.colormap); //release colormap');
-      that.colormap = that.gl.createTexture();
-      that.gl.activeTexture(that.gl.TEXTURE1);
-      that.gl.bindTexture(that.gl.TEXTURE_2D, that.colormap);
-      that.gl.texStorage2D(that.gl.TEXTURE_2D, 1, that.gl.RGBA8, 256, 1);
-      that.gl.texParameteri(that.gl.TEXTURE_2D, that.gl.TEXTURE_MIN_FILTER, that.gl.LINEAR);
-      that.gl.texParameteri(that.gl.TEXTURE_2D, that.gl.TEXTURE_WRAP_R, that.gl.CLAMP_TO_EDGE);
-      that.gl.texParameteri(that.gl.TEXTURE_2D, that.gl.TEXTURE_WRAP_S, that.gl.CLAMP_TO_EDGE);
-      that.gl.texSubImage2D(that.gl.TEXTURE_2D, 0, 0, 0, 256, 1, that.gl.RGBA, that.gl.UNSIGNED_BYTE, lut);
-    }
-
-    window.onload = function () {
-      //menu items
-      var buttons = document.getElementsByClassName("viewBtn");
-      for (let i = 0; i < buttons.length; i++)
-        buttons[i].addEventListener("click", that.onButtonClick, false);
-      buttons = document.getElementsByClassName("divider");
-      for (let i = 0; i < buttons.length; i++)
-        buttons[i].addEventListener("click", that.onButtonClick, false);
-      that.gl = that.canvas.getContext("webgl2");
-      if (!that.gl) {
-        alert("Unable to initialize WebGL2. Your browser may not support it");
-        return;
-      }
-      window.addEventListener('resize', that.onWindowResize(), false);
-      that.onWindowResize(true);
-      // Register mouse and touch listeners
-      var controller = new Controller();
-      controller.mousemove = function (prev, cur, evt) {
-        if (evt.buttons == 1) {
-          that.camera.rotate(prev, cur);
-
-        } else if (evt.buttons == 2) {
-          that.camera.pan([cur[0] - prev[0], prev[1] - cur[1]]);
-        }
-      };
-      controller.wheel = function (amt) {
-        that.camera.zoom(amt);
-      };
-      controller.pinch = controller.wheel;
-      controller.twoFingerDrag = function (drag) {
-        that.camera.pan(drag);
-      };
-      controller.registerForCanvas(that.canvas);
-      // Setup VAO and VBO to render the cube to run the raymarching shader
-      that.vao = that.gl.createVertexArray();
-      that.gl.bindVertexArray(that.vao);
-      that.vbo = that.gl.createBuffer();
-      that.gl.bindBuffer(that.gl.ARRAY_BUFFER, that.vbo);
-      that.gl.bufferData(that.gl.ARRAY_BUFFER, new Float32Array(that.cubeStrip), that.gl.STATIC_DRAW);
-      that.gl.enableVertexAttribArray(0);
-      that.gl.vertexAttribPointer(0, 3, that.gl.FLOAT, false, 0, 0);
-      that.sobelShader = new Shader(blurVertShader, sobelFragShader, that.gl);
-      that.sobelShader.use(that.gl);
-      that.blurShader = new Shader(blurVertShader, blurFragShader, that.gl);
-      that.blurShader.use(that.gl);
-      that.setShader(1); //Lighting shader
-      // Setup required OpenGL state for drawing the back faces and
-      // composting with the background color
-      that.gl.enable(that.gl.CULL_FACE);
-      that.gl.cullFace(that.gl.FRONT);
-      that.gl.enable(that.gl.BLEND);
-      that.gl.blendFunc(that.gl.ONE, that.gl.ONE_MINUS_SRC_ALPHA);
-      //gl.clearColor(1, 0.5, 0.5, 3);
-      // Load the default colormap and upload it, after which we
-      // load the default volume.
-      selectColormap("Gray");
-      that.selectVolume("spmSmall.nii.gz");
-    }
-  }
-
+  } //onButtonClick()
 
   allowDrop(ev) {
     ev.preventDefault();
@@ -719,5 +699,20 @@ export class RendererComponent implements OnInit {
     ev.preventDefault();
     console.log(ev.dataTransfer.files[0])
     this.selectVolume(ev.dataTransfer.files[0], false);
+  }
+
+  formatLabel(value: number) {
+    return value;
+  }
+
+  adjustMinValue(event) {
+    console.log(event.value);
+    this.hdr.cal_min = event.value;
+    this.updateVolume();
+  }
+
+  adjustMaxValue(event) {
+    this.hdr.cal_max = event.value;
+    this.updateVolume();
   }
 }

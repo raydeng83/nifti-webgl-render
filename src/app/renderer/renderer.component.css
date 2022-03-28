@@ -87,4 +87,6 @@ canvas {
   margin: 0 auto;
 }
 
-
+.fill-space {
+flex: 1 1 auto;
+}
